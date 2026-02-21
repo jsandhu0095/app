@@ -20,6 +20,10 @@ export default function CarDetails() {
   const [errorMsg, setErrorMsg] = useState<string>(''); 
   const [uploading, setUploading] = useState(false);
   
+  // --- NEW AI STATES ---
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiDescription, setAiDescription] = useState('');
+  
   // Form State
   const [partName, setPartName] = useState('');
   const [askPrice, setAskPrice] = useState('');
@@ -30,34 +34,56 @@ export default function CarDetails() {
 
     async function loadData() {
       try {
-        const { data: carData, error: carError } = await supabase
-          .from('donor_stats')
-          .select('*')
-          .eq('donor_id', id)
-          .single();
-        
+        const { data: carData, error: carError } = await supabase.from('donor_stats').select('*').eq('donor_id', id).single();
         if (carError) throw new Error("Database Error (Car): " + carError.message);
         setCar(carData);
 
-        const { data: partsData, error: partsError } = await supabase
-          .from('parts')
-          .select('*')
-          .eq('donor_id', id)
-          .order('created_at', { ascending: false });
-        
+        const { data: partsData, error: partsError } = await supabase.from('parts').select('*').eq('donor_id', id).order('created_at', { ascending: false });
         if (partsError) throw new Error("Database Error (Parts): " + partsError.message);
         setParts(partsData || []);
-        
       } catch (err: any) {
-        console.error(err);
         setErrorMsg(err.message); 
       } finally {
         setLoading(false); 
       }
     }
-
     loadData();
   }, [id]);
+
+  // --- NEW: THE AI MAGIC FUNCTION ---
+  async function autoFillWithAI() {
+    if (!file) return alert("Please select a photo first so Gemini can see it!");
+    setIsAnalyzing(true);
+
+    try {
+      // 1. Upload photo to Supabase temporarily so Gemini can access the URL
+      const fileExt = file.name.split('.').pop();
+      const fileName = `temp_ai_${Math.random()}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from('part-images').upload(fileName, file);
+      
+      if (uploadError) throw new Error("Failed to upload image for AI analysis");
+      const { data: { publicUrl } } = supabase.storage.from('part-images').getPublicUrl(fileName);
+
+      // 2. Send URL to our new Backend Tunnel
+      const res = await fetch('/api/analyze-part', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: publicUrl })
+      });
+
+      const aiData = await res.json();
+      if (aiData.error) throw new Error(aiData.error);
+
+      // 3. Fill out the form automatically!
+      setPartName(aiData.title || '');
+      setAiDescription(`Condition: ${aiData.condition}\n\n${aiData.description}`);
+
+    } catch (err: any) {
+      alert("AI Error: " + err.message);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
 
   async function addPart() {
     if (!partName || !askPrice) return alert("Need name and price!");
@@ -72,8 +98,6 @@ export default function CarDetails() {
       if (!uploadError) {
         const { data: { publicUrl } } = supabase.storage.from('part-images').getPublicUrl(fileName);
         imageUrl = publicUrl;
-      } else {
-        alert("Image upload failed: " + uploadError.message);
       }
     }
 
@@ -82,9 +106,7 @@ export default function CarDetails() {
       user_id: fakeUserId, donor_id: id, name: partName, asking_price: parseFloat(askPrice), status: 'inventory', image_url: imageUrl
     });
 
-    setPartName(''); setAskPrice(''); setFile(null); setUploading(false);
-    
-    // Refresh page manually to avoid state complexities
+    setPartName(''); setAskPrice(''); setFile(null); setAiDescription(''); setUploading(false);
     window.location.reload(); 
   }
 
@@ -93,20 +115,7 @@ export default function CarDetails() {
     window.location.reload();
   }
 
-  // --- UI RENDERING ---
-
-  if (errorMsg) {
-    return (
-      <div className="min-h-screen bg-slate-900 text-white p-10 flex flex-col items-center justify-center">
-        <div className="bg-red-900/50 border border-red-500 p-8 rounded-xl max-w-xl text-center">
-          <h2 className="text-2xl font-bold text-red-400 mb-4">🚨 Something Broke</h2>
-          <p className="font-mono text-sm text-red-200">{errorMsg}</p>
-          <button onClick={() => router.push('/')} className="mt-6 bg-slate-800 px-6 py-2 rounded hover:bg-slate-700">Go Back to Garage</button>
-        </div>
-      </div>
-    );
-  }
-
+  if (errorMsg) return <div className="p-10 text-red-400 font-mono">Error: {errorMsg}</div>;
   if (loading) return <div className="p-10 text-white font-mono text-center mt-20">Loading parts...</div>;
 
   return (
@@ -122,27 +131,57 @@ export default function CarDetails() {
           </div>
         </div>
 
+        {/* Updated Form with AI Button */}
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 mb-8 shadow-lg">
            <h3 className="text-lg font-bold mb-4 text-slate-200">Log a New Part</h3>
-           <div className="flex flex-col md:flex-row gap-4 items-end">
-            <div className="flex-1 w-full">
-              <label className="text-xs text-slate-400 mb-1 block">Part Name</label>
-              <input placeholder="e.g. Steering Wheel" value={partName} onChange={e => setPartName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" />
+           
+           <div className="flex flex-col gap-4">
+             {/* Top Row: File Upload & AI Button */}
+             <div className="flex flex-col md:flex-row items-center gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                <input type="file" accept="image/*" onChange={e => setFile(e.target.files ? e.target.files[0] : null)} className="w-full md:w-auto text-sm text-slate-400 cursor-pointer" />
+                <button 
+                  onClick={autoFillWithAI} 
+                  disabled={isAnalyzing || !file} 
+                  className="w-full md:w-auto bg-purple-600 px-6 py-2 rounded-lg font-bold hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                >
+                  {isAnalyzing ? '🧠 Gemini is thinking...' : '✨ Auto-Fill with AI'}
+                </button>
+             </div>
+
+             {/* Middle Row: Name & Price */}
+             <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1">
+                <label className="text-xs text-slate-400 mb-1 block">Part Name</label>
+                <input placeholder="e.g. Steering Wheel" value={partName} onChange={e => setPartName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-blue-500 outline-none" />
+              </div>
+              <div className="w-full md:w-48">
+                 <label className="text-xs text-slate-400 mb-1 block">Price ($)</label>
+                <input placeholder="Price" type="number" value={askPrice} onChange={e => setAskPrice(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-blue-500 outline-none" />
+              </div>
             </div>
-            <div className="w-full md:w-32">
-               <label className="text-xs text-slate-400 mb-1 block">Price ($)</label>
-              <input placeholder="Price" type="number" value={askPrice} onChange={e => setAskPrice(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" />
+
+            {/* AI Generated Description Box */}
+            {aiDescription && (
+              <div className="w-full">
+                <label className="text-xs text-purple-400 mb-1 block font-bold">✨ AI Generated Listing (Copy to Marketplace)</label>
+                <textarea 
+                  readOnly 
+                  value={aiDescription} 
+                  className="w-full bg-slate-900 border border-purple-500/50 rounded-lg p-3 text-slate-300 h-24 text-sm"
+                />
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <div className="flex justify-end mt-2">
+              <button onClick={addPart} disabled={uploading} className="bg-blue-600 px-10 py-3 rounded-lg font-bold hover:bg-blue-500 disabled:opacity-50">
+                {uploading ? 'Saving to Database...' : 'Save Part'}
+              </button>
             </div>
-            <div className="w-full md:w-auto">
-               <label className="text-xs text-slate-400 mb-1 block">Photo (Optional)</label>
-              <input type="file" accept="image/*" onChange={e => setFile(e.target.files ? e.target.files[0] : null)} className="w-full text-sm text-slate-400 cursor-pointer" />
-            </div>
-            <button onClick={addPart} disabled={uploading} className="w-full md:w-auto bg-blue-600 px-8 py-3 rounded-lg font-bold hover:bg-blue-500">
-              {uploading ? 'Saving...' : 'Add'}
-            </button>
           </div>
         </div>
 
+        {/* Parts List */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {parts.map((part) => (
             <div key={part.id} className="flex flex-col bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg">
