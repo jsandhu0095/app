@@ -20,7 +20,10 @@ export default function CarDetails() {
   const [errorMsg, setErrorMsg] = useState<string>(''); 
   const [uploading, setUploading] = useState(false);
   
-  // --- NEW AI STATES ---
+  // NEW: The Bouncer state
+  const [user, setUser] = useState<any>(null);
+
+  // AI States
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiDescription, setAiDescription] = useState('');
   
@@ -32,7 +35,17 @@ export default function CarDetails() {
   useEffect(() => {
     if (!id) return; 
 
-    async function loadData() {
+    // NEW: Check ID at the door
+    async function checkUserAndLoadData() {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        router.push('/login'); // Kick out if not logged in
+        return;
+      }
+      
+      setUser(session.user); // Save the real user
+
       try {
         const { data: carData, error: carError } = await supabase.from('donor_stats').select('*').eq('donor_id', id).single();
         if (carError) throw new Error("Database Error (Car): " + carError.message);
@@ -47,16 +60,15 @@ export default function CarDetails() {
         setLoading(false); 
       }
     }
-    loadData();
-  }, [id]);
+    
+    checkUserAndLoadData();
+  }, [id, router]);
 
-  // --- NEW: THE AI MAGIC FUNCTION ---
   async function autoFillWithAI() {
     if (!file) return alert("Please select a photo first so Gemini can see it!");
     setIsAnalyzing(true);
 
     try {
-      // 1. Upload photo to Supabase temporarily so Gemini can access the URL
       const fileExt = file.name.split('.').pop();
       const fileName = `temp_ai_${Math.random()}.${fileExt}`;
       const { error: uploadError } = await supabase.storage.from('part-images').upload(fileName, file);
@@ -64,7 +76,6 @@ export default function CarDetails() {
       if (uploadError) throw new Error("Failed to upload image for AI analysis");
       const { data: { publicUrl } } = supabase.storage.from('part-images').getPublicUrl(fileName);
 
-      // 2. Send URL to our new Backend Tunnel
       const res = await fetch('/api/analyze-part', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -74,7 +85,6 @@ export default function CarDetails() {
       const aiData = await res.json();
       if (aiData.error) throw new Error(aiData.error);
 
-      // 3. Fill out the form automatically!
       setPartName(aiData.title || '');
       setAiDescription(`Condition: ${aiData.condition}\n\n${aiData.description}`);
 
@@ -87,6 +97,8 @@ export default function CarDetails() {
 
   async function addPart() {
     if (!partName || !askPrice) return alert("Need name and price!");
+    if (!user) return alert("You must be logged in!"); // Security check
+    
     setUploading(true);
     let imageUrl = null;
 
@@ -101,9 +113,14 @@ export default function CarDetails() {
       }
     }
 
-    const fakeUserId = '81239150-f897-4c2c-b5f4-f26abc3844d4'; 
+    // ✨ THE FIX: We are now using user.id instead of the fake ghost user ✨
     await supabase.from('parts').insert({
-      user_id: fakeUserId, donor_id: id, name: partName, asking_price: parseFloat(askPrice), status: 'inventory', image_url: imageUrl
+      user_id: user.id, 
+      donor_id: id, 
+      name: partName, 
+      asking_price: parseFloat(askPrice), 
+      status: 'inventory', 
+      image_url: imageUrl
     });
 
     setPartName(''); setAskPrice(''); setFile(null); setAiDescription(''); setUploading(false);
@@ -116,7 +133,7 @@ export default function CarDetails() {
   }
 
   if (errorMsg) return <div className="p-10 text-red-400 font-mono">Error: {errorMsg}</div>;
-  if (loading) return <div className="p-10 text-white font-mono text-center mt-20">Loading parts...</div>;
+  if (loading) return <div className="p-10 text-white font-mono text-center mt-20">Loading garage...</div>;
 
   return (
     <div className="min-h-screen bg-slate-900 text-white p-8 font-sans">
@@ -131,12 +148,10 @@ export default function CarDetails() {
           </div>
         </div>
 
-        {/* Updated Form with AI Button */}
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 mb-8 shadow-lg">
            <h3 className="text-lg font-bold mb-4 text-slate-200">Log a New Part</h3>
            
            <div className="flex flex-col gap-4">
-             {/* Top Row: File Upload & AI Button */}
              <div className="flex flex-col md:flex-row items-center gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                 <input type="file" accept="image/*" onChange={e => setFile(e.target.files ? e.target.files[0] : null)} className="w-full md:w-auto text-sm text-slate-400 cursor-pointer" />
                 <button 
@@ -148,7 +163,6 @@ export default function CarDetails() {
                 </button>
              </div>
 
-             {/* Middle Row: Name & Price */}
              <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1">
                 <label className="text-xs text-slate-400 mb-1 block">Part Name</label>
@@ -160,7 +174,6 @@ export default function CarDetails() {
               </div>
             </div>
 
-            {/* AI Generated Description Box */}
             {aiDescription && (
               <div className="w-full">
                 <label className="text-xs text-purple-400 mb-1 block font-bold">✨ AI Generated Listing (Copy to Marketplace)</label>
@@ -172,7 +185,6 @@ export default function CarDetails() {
               </div>
             )}
 
-            {/* Submit Button */}
             <div className="flex justify-end mt-2">
               <button onClick={addPart} disabled={uploading} className="bg-blue-600 px-10 py-3 rounded-lg font-bold hover:bg-blue-500 disabled:opacity-50">
                 {uploading ? 'Saving to Database...' : 'Save Part'}
@@ -181,7 +193,6 @@ export default function CarDetails() {
           </div>
         </div>
 
-        {/* Parts List */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {parts.map((part) => (
             <div key={part.id} className="flex flex-col bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg">
@@ -205,6 +216,11 @@ export default function CarDetails() {
               </div>
             </div>
           ))}
+          {parts.length === 0 && (
+            <div className="col-span-full text-center py-12 border-2 border-dashed border-slate-700 rounded-xl">
+              <p className="text-slate-400">No parts logged yet. Use the ✨ Auto-Fill AI to log your first part!</p>
+            </div>
+          )}
         </div>
 
       </div>
