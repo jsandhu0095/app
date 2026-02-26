@@ -51,24 +51,19 @@ export default function GarageDashboard() {
     else { setYear(''); setMake(''); setModel(''); setPurchasePrice(''); loadCars(user.id); }
   }
 
-  // ✨ NEW: The Oops Button Logic ✨
   async function deleteCar(donorId: string, event: any) {
-    // This stops the click from opening the car page!
     event.stopPropagation(); 
     
     const confirmed = window.confirm("Are you sure you want to delete this car? This will also delete ALL parts attached to it. This cannot be undone.");
     if (!confirmed) return;
 
-    // 1. Delete all attached parts first so the database doesn't yell at us
     await supabase.from('parts').delete().eq('donor_id', donorId);
-    
-    // 2. Delete the actual car
     const { error } = await supabase.from('donors').delete().eq('id', donorId);
 
     if (error) {
       alert("Error deleting car: " + error.message);
     } else {
-      loadCars(user.id); // Refresh the garage
+      loadCars(user.id); 
     }
   }
 
@@ -115,7 +110,6 @@ export default function GarageDashboard() {
             <div key={car.donor_id} onClick={() => router.push(`/car/${car.donor_id}`)} className="bg-slate-800 rounded-xl border border-slate-700 p-6 cursor-pointer hover:border-blue-500 transition-all shadow-lg relative group">
               <h2 className="text-xl font-bold mb-4 text-white truncate pr-8">{car.car_name}</h2>
               
-              {/* ✨ NEW: The Delete Car Button ✨ */}
               <button 
                 onClick={(e) => deleteCar(car.donor_id, e)} 
                 className="absolute top-6 right-6 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -125,9 +119,13 @@ export default function GarageDashboard() {
               </button>
 
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between"><span className="text-slate-400">Cost:</span><span className="font-mono text-slate-200">${car.purchase_price}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Car Cost:</span><span className="font-mono text-slate-200">${car.purchase_price}</span></div>
+                
+                {/* ✨ NEW: Expenses Line on the Dashboard ✨ */}
+                <div className="flex justify-between"><span className="text-slate-400">Expenses:</span><span className="font-mono text-orange-400">${car.total_expenses}</span></div>
+                
                 <div className="flex justify-between"><span className="text-slate-400">Revenue:</span><span className="font-mono text-green-400">${car.total_revenue}</span></div>
-                <div className="flex justify-between pt-3 border-t border-slate-700 mt-2"><span className="text-slate-300 font-bold">Profit:</span><span className={`font-mono font-bold text-lg ${car.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>${car.net_profit}</span></div>
+                <div className="flex justify-between pt-3 border-t border-slate-700 mt-2"><span className="text-slate-300 font-bold">Net Profit:</span><span className={`font-mono font-bold text-lg ${car.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>${car.net_profit}</span></div>
               </div>
               <div className="mt-5 w-full bg-slate-900 rounded-full h-2.5 overflow-hidden"><div className="bg-gradient-to-r from-blue-500 to-green-400 h-2.5" style={{ width: `${Math.min(car.breakeven_percentage || 0, 100)}%` }}></div></div>
               <p className="text-right text-xs mt-2 text-slate-500">{car.breakeven_percentage}% Recouped</p>
