@@ -60,11 +60,47 @@ export default function GarageDashboard() {
     await supabase.from('parts').delete().eq('donor_id', donorId);
     const { error } = await supabase.from('donors').delete().eq('id', donorId);
 
-    if (error) {
-      alert("Error deleting car: " + error.message);
-    } else {
-      loadCars(user.id); 
-    }
+    if (error) alert("Error deleting car: " + error.message);
+    else loadCars(user.id); 
+  }
+
+  // ✨ NEW: The Magic CSV Exporter Function ✨
+  function exportGarageToCSV() {
+    if (cars.length === 0) return alert("Your garage is empty. Nothing to export!");
+
+    // 1. Create the header row
+    const headers = ['Car Name', 'Purchase Price', 'Total Expenses', 'Total Revenue', 'Net Profit', 'Breakeven %'];
+
+    // 2. Map the cars into spreadsheet rows
+    const rows = cars.map(car => [
+      `"${car.car_name}"`, // Wrapped in quotes just in case the name has a comma in it!
+      car.purchase_price,
+      car.total_expenses,
+      car.total_revenue,
+      car.net_profit,
+      `${car.breakeven_percentage}%`
+    ]);
+
+    // 3. Glue it all together with commas and new lines
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+
+    // 4. Create an invisible download link and click it for the user
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    
+    // Generate a file name with today's date
+    const today = new Date().toISOString().split('T')[0];
+    link.setAttribute('download', `PartOutPro_Export_${today}.csv`);
+    
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   async function handleSignOut() {
@@ -77,9 +113,18 @@ export default function GarageDashboard() {
   return (
     <div className="min-h-screen bg-slate-900 text-white p-8 font-sans">
       <div className="max-w-5xl mx-auto">
+        
+        {/* Header with our new Export Button */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-4xl font-bold">My Garage</h1>
-          <button onClick={handleSignOut} className="text-slate-400 hover:text-red-400 text-sm font-bold border border-slate-700 px-4 py-2 rounded-lg transition-colors">Sign Out</button>
+          <div className="flex gap-4">
+            <button onClick={exportGarageToCSV} className="text-slate-300 hover:text-white text-sm font-bold border border-slate-600 bg-slate-800 px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
+              📊 Export to CSV
+            </button>
+            <button onClick={handleSignOut} className="text-slate-400 hover:text-red-400 text-sm font-bold border border-slate-700 px-4 py-2 rounded-lg transition-colors">
+              Sign Out
+            </button>
+          </div>
         </div>
 
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 mb-10 shadow-lg">
@@ -120,10 +165,7 @@ export default function GarageDashboard() {
 
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between"><span className="text-slate-400">Car Cost:</span><span className="font-mono text-slate-200">${car.purchase_price}</span></div>
-                
-                {/* ✨ NEW: Expenses Line on the Dashboard ✨ */}
                 <div className="flex justify-between"><span className="text-slate-400">Expenses:</span><span className="font-mono text-orange-400">${car.total_expenses}</span></div>
-                
                 <div className="flex justify-between"><span className="text-slate-400">Revenue:</span><span className="font-mono text-green-400">${car.total_revenue}</span></div>
                 <div className="flex justify-between pt-3 border-t border-slate-700 mt-2"><span className="text-slate-300 font-bold">Net Profit:</span><span className={`font-mono font-bold text-lg ${car.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>${car.net_profit}</span></div>
               </div>
