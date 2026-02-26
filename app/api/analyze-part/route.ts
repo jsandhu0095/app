@@ -1,50 +1,47 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// 🚨 WARNING: HARDCODED API KEY 🚨
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Make sure you have your GEMINI_API_KEY in your .env.local file!
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
 export async function POST(req: Request) {
   try {
     const { imageUrl } = await req.json();
 
-    if (!imageUrl) {
-      return NextResponse.json({ error: "No image URL provided" }, { status: 400 });
-    }
+    // Fetch the image from Supabase so Gemini can see it
+    const imageResp = await fetch(imageUrl);
+    const arrayBuffer = await imageResp.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    // 1. Fetch the raw image file from Supabase so Gemini can actually "see" it
-    const imageResponse = await fetch(imageUrl);
-    const arrayBuffer = await imageResponse.arrayBuffer();
-    const base64Image = Buffer.from(arrayBuffer).toString('base64');
-    const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // 2. The Prompt
-    const prompt = `You are an expert auto parts appraiser. Look at this car part. Return a JSON object with exactly three keys: 'title' (a short, accurate eBay title), 'condition' (a brief assessment of visual condition), and 'description' (a professional 3-sentence marketplace description for selling this used part).`;
+    // ✨ NEW: The Appraiser Prompt ✨
+    const prompt = `You are an expert auto parts appraiser. Look at this car part.
+    Return ONLY a valid JSON object with these exact keys:
+    "title": A short, catchy title for a marketplace listing.
+    "condition": A brief assessment of the visible condition.
+    "description": A professional, persuasive marketplace listing description.
+    "estimated_price": A single number (integer) representing the estimated fair market value on eBay in USD. Do not include dollar signs or commas, just the raw number.`;
 
-    // 3. Ask Gemini
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: prompt },
-            { inlineData: { data: base64Image, mimeType: mimeType } }
-          ]
-        }
-      ],
-      config: {
-        // Force Gemini to always reply in perfect JSON format
-        responseMimeType: "application/json",
-      }
-    });
+    const imageParts = [
+      {
+        inlineData: {
+          data: buffer.toString("base64"),
+          mimeType: imageResp.headers.get("content-type") || "image/jpeg",
+        },
+      },
+    ];
 
-    // 4. Send the result back to your frontend
-    // ✨ THE FIX: Removed the () from response.text ✨
-    const aiData = JSON.parse(response.text || '{}');
+    const result = await model.generateContent([prompt, ...imageParts]);
+    const responseText = result.response.text();
+    
+    // Clean up the AI's response to ensure it's perfect JSON
+    const jsonString = responseText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
+    const aiData = JSON.parse(jsonString);
+
     return NextResponse.json(aiData);
-
   } catch (error: any) {
-    console.error("Gemini Error:", error);
-    return NextResponse.json({ error: "Failed to analyze image" }, { status: 500 });
+    console.error("AI Route Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
