@@ -51,6 +51,27 @@ export default function GarageDashboard() {
     else { setYear(''); setMake(''); setModel(''); setPurchasePrice(''); loadCars(user.id); }
   }
 
+  // ✨ NEW: The Oops Button Logic ✨
+  async function deleteCar(donorId: string, event: any) {
+    // This stops the click from opening the car page!
+    event.stopPropagation(); 
+    
+    const confirmed = window.confirm("Are you sure you want to delete this car? This will also delete ALL parts attached to it. This cannot be undone.");
+    if (!confirmed) return;
+
+    // 1. Delete all attached parts first so the database doesn't yell at us
+    await supabase.from('parts').delete().eq('donor_id', donorId);
+    
+    // 2. Delete the actual car
+    const { error } = await supabase.from('donors').delete().eq('id', donorId);
+
+    if (error) {
+      alert("Error deleting car: " + error.message);
+    } else {
+      loadCars(user.id); // Refresh the garage
+    }
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.push('/login');
@@ -91,8 +112,18 @@ export default function GarageDashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {cars.map((car) => (
-            <div key={car.donor_id} onClick={() => router.push(`/car/${car.donor_id}`)} className="bg-slate-800 rounded-xl border border-slate-700 p-6 cursor-pointer hover:border-blue-500 transition-all shadow-lg">
-              <h2 className="text-xl font-bold mb-4 text-white truncate">{car.car_name}</h2>
+            <div key={car.donor_id} onClick={() => router.push(`/car/${car.donor_id}`)} className="bg-slate-800 rounded-xl border border-slate-700 p-6 cursor-pointer hover:border-blue-500 transition-all shadow-lg relative group">
+              <h2 className="text-xl font-bold mb-4 text-white truncate pr-8">{car.car_name}</h2>
+              
+              {/* ✨ NEW: The Delete Car Button ✨ */}
+              <button 
+                onClick={(e) => deleteCar(car.donor_id, e)} 
+                className="absolute top-6 right-6 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Delete Car"
+              >
+                ✕
+              </button>
+
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between"><span className="text-slate-400">Cost:</span><span className="font-mono text-slate-200">${car.purchase_price}</span></div>
                 <div className="flex justify-between"><span className="text-slate-400">Revenue:</span><span className="font-mono text-green-400">${car.total_revenue}</span></div>
@@ -102,6 +133,11 @@ export default function GarageDashboard() {
               <p className="text-right text-xs mt-2 text-slate-500">{car.breakeven_percentage}% Recouped</p>
             </div>
           ))}
+          {cars.length === 0 && (
+            <div className="col-span-full text-center py-12 border-2 border-dashed border-slate-700 rounded-xl">
+              <p className="text-slate-400">Your garage is empty. Add your first donor car above!</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
