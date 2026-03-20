@@ -1,27 +1,33 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Make sure you have your GEMINI_API_KEY in your .env.local file!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 export async function POST(req: Request) {
   try {
     const { imageUrl } = await req.json();
 
-    // Fetch the image from Supabase so Gemini can see it
     const imageResp = await fetch(imageUrl);
     const arrayBuffer = await imageResp.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    // ✨ NEW: Forcing the AI into strict JSON Mode so it NEVER forgets a key
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: { responseMimeType: "application/json" } 
+    });
 
-    // ✨ NEW: The Appraiser Prompt ✨
+    // ✨ We give it a literal template to fill out
     const prompt = `You are an expert auto parts appraiser. Look at this car part.
-    Return ONLY a valid JSON object with these exact keys:
-    "title": A short, catchy title for a marketplace listing.
-    "condition": A brief assessment of the visible condition.
-    "description": A professional, persuasive marketplace listing description.
-    "estimated_price": A single number (integer) representing the estimated fair market value on eBay in USD. Do not include dollar signs or commas, just the raw number.`;
+    You must respond with a valid JSON object exactly matching this structure:
+    {
+      "title": "A short, catchy title for a marketplace listing",
+      "ebay_search_term": "A highly optimized 3-to-4 word search string for eBay (e.g., Porsche Brake Caliper)",
+      "condition": "A brief assessment of the visible condition",
+      "description": "A professional, persuasive marketplace listing description",
+      "estimated_price": 150
+    }
+    Remember: estimated_price must be a raw number.`;
 
     const imageParts = [
       {
@@ -35,13 +41,15 @@ export async function POST(req: Request) {
     const result = await model.generateContent([prompt, ...imageParts]);
     const responseText = result.response.text();
     
-    // Clean up the AI's response to ensure it's perfect JSON
-    const jsonString = responseText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
-    const aiData = JSON.parse(jsonString);
+    // Because we used strict JSON mode, we don't need messy regex cleanup anymore!
+    const aiData = JSON.parse(responseText);
+    
+    // Log what the AI actually built so we can see it in the VS Code terminal
+    console.log("🧠 AI Raw Output:", aiData); 
 
     return NextResponse.json(aiData);
   } catch (error: any) {
-    console.error("AI Route Error:", error);
+    console.error("❌ AI Route Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

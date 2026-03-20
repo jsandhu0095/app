@@ -29,14 +29,15 @@ export default function CarDetails() {
   
   const [partName, setPartName] = useState('');
   const [askPrice, setAskPrice] = useState('');
-  
-  // ✨ NEW: Changed from single file to a list of files ✨
   const [files, setFiles] = useState<FileList | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [editingPartId, setEditingPartId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editPrice, setEditPrice] = useState('');
+
+  const [isSearchingEbay, setIsSearchingEbay] = useState(false);
+  const [ebayResults, setEbayResults] = useState<any[]>([]);
 
   useEffect(() => {
     if (!id) return; 
@@ -67,8 +68,9 @@ export default function CarDetails() {
   async function autoFillWithAI() {
     if (!files || files.length === 0) return alert("Please select a photo first!");
     setIsAnalyzing(true);
+    setEbayResults([]); 
+    
     try {
-      // Just use the first photo for the AI analysis
       const fileToAnalyze = files[0];
       const fileExt = fileToAnalyze.name.split('.').pop();
       const fileName = `temp_ai_${Math.random()}.${fileExt}`;
@@ -81,21 +83,49 @@ export default function CarDetails() {
       const aiData = await res.json();
       if (aiData.error) throw new Error(aiData.error);
 
-      setPartName(aiData.title || '');
+      // 1. Populate the UI with the beautiful, descriptive AI data
+      const newTitle = aiData.title || '';
+      setPartName(newTitle);
       if (aiData.estimated_price) setAskPrice(aiData.estimated_price.toString());
       setAiDescription(`Condition: ${aiData.condition}\n\n${aiData.description}`);
-    } catch (err: any) { alert("AI Error: " + err.message); } 
-    finally { setIsAnalyzing(false); }
+
+      // 2. Automatically trigger eBay search using the AI's hidden optimized string!
+      const optimizedSearch = aiData.ebay_search_term || newTitle;
+      if (optimizedSearch) {
+        await fetchEbayData(optimizedSearch);
+      }
+
+    } catch (err: any) { 
+      alert("AI Error: " + err.message); 
+    } finally { 
+      setIsAnalyzing(false); 
+    }
   }
 
-  // ✨ NEW: Upload multiple files in a loop ✨
+  async function fetchEbayData(queryToSearch: string) {
+    if (!queryToSearch) return;
+    setIsSearchingEbay(true);
+    try {
+      const res = await fetch('/api/ebay-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: queryToSearch })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setEbayResults(data.items || []);
+    } catch (err: any) {
+      alert("eBay Error: " + err.message);
+    } finally {
+      setIsSearchingEbay(false);
+    }
+  }
+
   async function addPart() {
     if (!partName || !askPrice) return alert("Need name and price!");
     if (!user) return alert("You must be logged in!"); 
     setUploading(true);
-    
     let uploadedUrls: string[] = [];
-
     if (files && files.length > 0) {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -108,17 +138,7 @@ export default function CarDetails() {
         }
       }
     }
-
-    await supabase.from('parts').insert({ 
-      user_id: user.id, 
-      donor_id: id, 
-      name: partName, 
-      asking_price: parseFloat(askPrice), 
-      status: 'inventory', 
-      image_url: uploadedUrls[0] || null, // Keep the first image for old code compatibility
-      image_urls: uploadedUrls            // Save the full array!
-    });
-    
+    await supabase.from('parts').insert({ user_id: user.id, donor_id: id, name: partName, asking_price: parseFloat(askPrice), status: 'inventory', image_url: uploadedUrls[0] || null, image_urls: uploadedUrls });
     window.location.reload(); 
   }
 
@@ -167,7 +187,7 @@ export default function CarDetails() {
   return (
     <div className="min-h-screen bg-slate-900 text-white p-8 font-sans">
       <div className="max-w-6xl mx-auto">
-        <button onClick={() => router.push('/')} className="mb-6 text-slate-400 hover:text-white">&larr; Back to Garage</button>
+        <button onClick={() => router.push('/')} className="mb-6 text-slate-400 hover:text-white transition-colors">&larr; Back to Garage</button>
 
         <div className="bg-slate-800 p-8 rounded-xl border border-slate-700 mb-8 shadow-lg">
           <h1 className="text-3xl font-bold mb-4">{car?.car_name}</h1>
@@ -183,23 +203,72 @@ export default function CarDetails() {
           <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
             <h3 className="text-lg font-bold mb-4 text-slate-200">Log a New Part</h3>
             <div className="flex flex-col gap-4">
+              
               <div className="flex flex-col md:flex-row items-center gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
-                  {/* ✨ NEW: Added 'multiple' to the file input! ✨ */}
-                  <input type="file" accept="image/*" multiple onChange={e => setFiles(e.target.files)} className="w-full md:w-auto text-sm text-slate-400 cursor-pointer" />
-                  <button onClick={autoFillWithAI} disabled={isAnalyzing || !files} className="w-full md:w-auto bg-purple-600 px-6 py-2 rounded-lg font-bold hover:bg-purple-500 disabled:opacity-50 transition-colors">
-                    {isAnalyzing ? '🧠 Pricing...' : '✨ Auto-Fill + Price'}
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    multiple 
+                    onChange={e => setFiles(e.target.files)} 
+                    className="w-full md:w-auto text-sm text-slate-300 cursor-pointer 
+                               file:mr-4 file:py-2.5 file:px-5 file:rounded-lg file:border-0 
+                               file:text-sm file:font-bold file:bg-slate-700 file:text-white 
+                               hover:file:bg-slate-600 file:transition-colors file:cursor-pointer" 
+                  />
+                  <button onClick={autoFillWithAI} disabled={isAnalyzing || !files} className="w-full md:w-auto bg-purple-600 px-6 py-2 rounded-lg font-bold hover:bg-purple-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-900/20">
+                    {isAnalyzing ? (
+                      <span className="animate-pulse">🧠 Processing AI & Market...</span>
+                    ) : (
+                      '✨ AI Analyze & Market Match'
+                    )}
                   </button>
               </div>
-              {/* Show user how many files they picked */}
-              {files && files.length > 0 && <p className="text-xs text-blue-400">{files.length} photo(s) selected.</p>}
+              {files && files.length > 0 && <p className="text-xs text-slate-400">{files.length} photo(s) selected.</p>}
               
-              <div className="flex gap-4">
-                <div className="flex-1"><input placeholder="Part Name" value={partName} onChange={e => setPartName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none" /></div>
-                <div className="w-32"><input placeholder="Price" type="number" value={askPrice} onChange={e => setAskPrice(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none" /></div>
+              <div className="flex gap-4 relative">
+                <div className="flex-1 relative">
+                  <input placeholder="Part Name" value={partName} onChange={e => setPartName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 pr-12 text-white outline-none focus:border-purple-500 transition-colors" />
+                  <button 
+                    onClick={() => fetchEbayData(partName)} 
+                    disabled={isSearchingEbay || !partName || isAnalyzing}
+                    title="Manual eBay Search"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-blue-400 disabled:opacity-50 transition-colors"
+                  >
+                    {isSearchingEbay ? '⏳' : '🔍'}
+                  </button>
+                </div>
+
+                <div className="w-32 relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+                  <input placeholder="Price" type="number" value={askPrice} onChange={e => setAskPrice(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 pl-7 text-white outline-none focus:border-green-500 transition-colors font-mono" />
+                </div>
               </div>
-              {aiDescription && <textarea readOnly value={aiDescription} className="w-full bg-slate-900 border border-purple-500/50 rounded-lg p-3 text-slate-300 h-24 text-sm" />}
-              <button onClick={addPart} disabled={uploading} className="bg-blue-600 py-3 rounded-lg font-bold hover:bg-blue-500 disabled:opacity-50 mt-2">
-                {uploading ? `Saving ${files?.length || 0} Photos...` : 'Save Part'}
+
+              {ebayResults.length > 0 && (
+                <div className="bg-slate-900/80 border border-blue-500/30 rounded-lg p-4 text-sm shadow-inner">
+                  <h4 className="text-blue-400 font-bold mb-3 flex items-center justify-between">
+                    Live eBay Market (Active)
+                    <button onClick={() => setEbayResults([])} className="text-slate-500 hover:text-white transition-colors">✕</button>
+                  </h4>
+                  <div className="space-y-3">
+                    {ebayResults.map((item: any) => (
+                      <div key={item.itemId} className="flex justify-between items-center gap-4">
+                        <a href={item.itemWebUrl} target="_blank" rel="noopener noreferrer" className="text-slate-300 hover:text-white hover:underline line-clamp-1 flex-1">
+                          {item.title}
+                        </a>
+                        <span className="text-green-400 font-mono font-bold whitespace-nowrap">
+                          ${item.price.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {aiDescription && <textarea readOnly value={aiDescription} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-300 h-24 text-sm outline-none focus:border-purple-500 transition-colors" />}
+              
+              <button onClick={addPart} disabled={uploading} className="bg-blue-600 py-3 rounded-lg font-bold hover:bg-blue-500 disabled:opacity-50 mt-2 shadow-lg shadow-blue-900/20 transition-all">
+                {uploading ? `Saving ${files?.length || 0} Photos...` : 'Save Part to Garage'}
               </button>
             </div>
           </div>
@@ -221,6 +290,7 @@ export default function CarDetails() {
                   </div>
                 </div>
               ))}
+              {expenses.length === 0 && <p className="text-xs text-slate-500 text-center mt-4">No hidden expenses yet.</p>}
             </div>
           </div>
         </div>
@@ -231,15 +301,12 @@ export default function CarDetails() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredParts.map((part) => {
-            // Figure out which images to show (combining old single images and new multiple images)
             const allImages = part.image_urls && part.image_urls.length > 0 
               ? part.image_urls 
               : (part.image_url ? [part.image_url] : []);
 
             return (
               <div key={part.id} className="flex flex-col bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg relative group">
-                
-                {/* ✨ NEW: Horizontal scrolling image gallery! ✨ */}
                 <div className="h-48 bg-slate-900 relative flex overflow-x-auto snap-x snap-mandatory hide-scrollbar border-b border-slate-700">
                   {allImages.length > 0 ? (
                     allImages.map((img: string, index: number) => (
@@ -249,8 +316,6 @@ export default function CarDetails() {
                     <span className="text-slate-600 text-sm m-auto">No Image</span>
                   )}
                   <button onClick={() => deletePart(part.id)} className="absolute top-3 right-3 bg-red-900/80 hover:bg-red-800 text-red-200 text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10">Delete</button>
-                  
-                  {/* Photo count indicator */}
                   {allImages.length > 1 && (
                     <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full z-10 pointer-events-none">
                       {allImages.length} Photos
@@ -280,7 +345,7 @@ export default function CarDetails() {
                       <div className="flex flex-col items-end gap-2">
                         {part.status !== 'sold' ? (
                           <>
-                            <button onClick={() => markSold(part.id, part.asking_price)} className="bg-green-600 hover:bg-green-500 text-white text-sm px-4 py-2 rounded-lg w-full text-center">Mark Sold</button>
+                            <button onClick={() => markSold(part.id, part.asking_price)} className="bg-green-600 hover:bg-green-500 text-white text-sm px-4 py-2 rounded-lg w-full text-center shadow-lg shadow-green-900/20">Mark Sold</button>
                             <button onClick={() => startEditing(part)} className="text-blue-400 hover:text-blue-300 text-xs underline mt-1">Edit Info</button>
                           </>
                         ) : (
@@ -296,7 +361,7 @@ export default function CarDetails() {
           
           {filteredParts.length === 0 && (
             <div className="col-span-full text-center py-12 border-2 border-dashed border-slate-700 rounded-xl">
-              <p className="text-slate-400">{searchQuery ? "No parts match your search." : "No parts logged yet. Use the ✨ Auto-Fill AI to log your first part!"}</p>
+              <p className="text-slate-400">{searchQuery ? "No parts match your search." : "No parts logged yet."}</p>
             </div>
           )}
         </div>
